@@ -1,0 +1,174 @@
+/*{
+  "type": "action",
+  "targets": ["omnifocus"],
+  "author": "Bastian Kuhn",
+  "identifier": "de.bastian-kuhn.zammad.sync",
+  "version": "1.0",
+  "description": "Sync Tickets from Zammad with Omnifocus",
+  "label": "🔹 Zammad: Sync",
+  "shortLabel": "Zammad: sync"
+}*/
+(() => {
+  const action = new PlugIn.Action(function (selection, sender) {
+    const config = {
+        token: "", // you need to use api tokens
+        zammadUrl: "",
+        omnifocusTagToUse: "Zammad", // you can also use the format "Parent1 : Parent2 : Child"
+        userId: 1, // Set the userId of your profile
+      };
+
+      const token = config.token;
+      const zammadUrl = config.zammadUrl;
+      const omnifocusTagToUse = config.omnifocusTagToUse;
+      const user_id = config.userId;
+
+
+      let tag = null;
+
+      // If user gave an absolute path, parse it and process it
+      const parsedOmnifocusTagToUse = omnifocusTagToUse.split(" : ");
+      if (parsedOmnifocusTagToUse.length > 1) {
+        let currentTag = null;
+        let i;
+        for (i = 0; i < parsedOmnifocusTagToUse.length; i++) {
+          let newTag;
+          if (currentTag) {
+            newTag = currentTag.childNamed(parsedOmnifocusTagToUse[i]);
+          } else {
+            newTag = tags.byName(parsedOmnifocusTagToUse[i]);
+          }
+          if (!newTag) break;
+          currentTag = newTag;
+        }
+
+        // after all ran, check if its a success, then apply tag
+        if (
+          currentTag &&
+          i === parsedOmnifocusTagToUse.length &&
+          currentTag.name ===
+            parsedOmnifocusTagToUse[parsedOmnifocusTagToUse.length - 1]
+        ) {
+          tag = currentTag;
+        }
+      }
+      if (!tag) {
+        // if tag is not found yet
+        tag =
+          tags.byName(omnifocusTagToUse) ||
+          flattenedTags.byName(omnifocusTagToUse) ||
+          new Tag(omnifocusTagToUse);
+      }
+      if (!tag) {
+        console.error(new Error("could not create tag"));
+        return;
+      }
+
+      const tasks = tag.tasks;
+
+      // cache object instead of array so search will be faster later
+      let omnifocusTasks = {};
+      tasks.forEach((task) => {
+        const re = new RegExp(`^[0-9]+`);
+        let taskId
+        try {
+          taskId = task.name.match(re)[0];
+          if (!taskId) return;
+        } catch {
+          return;
+        }
+        omnifocusTasks[taskId] = task;
+        // Reset Jira Match Flag
+        omnifocusTasks[taskId].zammadToOmnifocusMatched = false;
+      });
+
+      const urlParamsUsers = '/api/v1/users';
+      const urlUsers = zammadUrl + urlParamsUsers;
+
+      const users = {};
+
+      const requestUsers = URL.FetchRequest.fromString(urlUsers);
+      requestUsers.method = "GET";
+      requestUsers.headers = { Authorization: `Token ${token}` };
+      const requestUsersPromise = requestUsers.fetch();
+      requestUsersPromise.then((response) => {
+        if (response.mimeType == "application/json") {
+          const jsonResponse = JSON.parse(response.bodyString);
+          for (const user of jsonResponse) {
+              users[user.id] = user;
+          }
+        }
+      });
+
+
+      const queryTickets = `owner_id:${user_id} AND state_id:2`;
+      const encodedQuery =  encodeURIComponent(queryTickets);
+      const urlParamsTickets = `/api/v1/tickets/search?query=${encodedQuery}`;
+      const urlTickets = zammadUrl + urlParamsTickets;
+
+      const request = URL.FetchRequest.fromString(urlTickets);
+
+
+      request.method = "GET";
+      request.headers = { Authorization: `Token ${token}` };
+      const requestPromise = request.fetch();
+
+      requestPromise.then((response) => {
+        if (response.mimeType == "application/json") {
+          const jsonResponse = JSON.parse(response.bodyString);
+          for (const ticketId of jsonResponse.tickets) {
+              const ticketData = jsonResponse.assets.Ticket[ticketId];
+              if (omnifocusTasks[ticketData.id]) {
+                // Make sure the task opens again
+                omnifocusTasks[ticketData.id].markIncomplete();
+                omnifocusTasks[ticketData.id].zammadToOmnifocusMatched = true;
+                continue;
+              }
+
+              // There was no Matching Task, so we create the Task
+              const userData = users[ticketData.customer_id];
+              const userString = `${userData.firstname} ${userData.lastname}`
+              const taskName = ticketData.id + " " + ticketData.title + " (" + userString  +")";
+              const newTask = new Task(taskName, inbox.beginning);
+              const taskUrl = zammadUrl + "#ticket/zoom/" + ticketData.id;
+
+              newTask.addTag(tag);
+              newTask.note =
+                taskUrl + "\n" + "No description";
+          }
+
+        }
+
+
+      });
+
+      requestPromise.catch((err) => {
+          console.log(`DEBUG: catch error ${err}`);
+      });
+
+      for (const [task_id, task] of Object.entries(omnifocusTasks)) {
+        if (!task.jiraToOmnifocusMatched) {
+            var can_delete = true;
+            if(task.hasChildren){
+                task.children.forEach(subtask => {
+                    if (!subtask.completed){
+                      can_delete = false;
+                    }
+                });
+            }
+            if(can_delete) {
+              task.markComplete();
+            }
+        }
+      }
+      
+  });
+
+  action.validate = function (selection, sender) {
+    //
+    // This action is always valid.
+    //
+    return true;
+  };
+
+  return action;
+})();
