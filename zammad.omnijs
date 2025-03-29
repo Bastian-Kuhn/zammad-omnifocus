@@ -3,7 +3,7 @@
   "targets": ["omnifocus"],
   "author": "Bastian Kuhn",
   "identifier": "de.bastian-kuhn.zammad.sync",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Sync Tickets from Zammad with Omnifocus",
   "label": "🔹 Zammad: Sync",
   "shortLabel": "Zammad: sync"
@@ -14,7 +14,7 @@
         token: "", // you need to use api tokens
         zammadUrl: "",
         omnifocusTagToUse: "Zammad", // you can also use the format "Parent1 : Parent2 : Child"
-        userId: 1, // Set the userId of your profile
+        userId: 4, 
       };
 
       const token = config.token;
@@ -77,7 +77,6 @@
           return;
         }
         omnifocusTasks[taskId] = task;
-        // Reset Jira Match Flag
         omnifocusTasks[taskId].zammadToOmnifocusMatched = false;
       });
 
@@ -100,9 +99,9 @@
       });
 
 
-      const queryTickets = `owner_id:${user_id} AND state_id:2`;
+      const queryTickets = `owner_id:${user_id} AND (state_id:2 OR state_id:1)`;
       const encodedQuery =  encodeURIComponent(queryTickets);
-      const urlParamsTickets = `/api/v1/tickets/search?query=${encodedQuery}`;
+      const urlParamsTickets = `/api/v1/tickets/search?query=${encodedQuery}&page=1&per_page=500`;
       const urlTickets = zammadUrl + urlParamsTickets;
 
       const request = URL.FetchRequest.fromString(urlTickets);
@@ -117,10 +116,12 @@
           const jsonResponse = JSON.parse(response.bodyString);
           for (const ticketId of jsonResponse.tickets) {
               const ticketData = jsonResponse.assets.Ticket[ticketId];
+              console.log(`Found: ${ticketData.title}`);
               if (omnifocusTasks[ticketData.id]) {
                 // Make sure the task opens again
                 omnifocusTasks[ticketData.id].markIncomplete();
                 omnifocusTasks[ticketData.id].zammadToOmnifocusMatched = true;
+                console.log('-> Opened it');
                 continue;
               }
 
@@ -130,10 +131,27 @@
               const taskName = ticketData.id + " " + ticketData.title + " (" + userString  +")";
               const newTask = new Task(taskName, inbox.beginning);
               const taskUrl = zammadUrl + "#ticket/zoom/" + ticketData.id;
+              console.log('-> Created new Task');
 
               newTask.addTag(tag);
               newTask.note =
-                taskUrl + "\n" + "No description";
+                taskUrl + "\n";
+          }
+
+          for (const [task_id, task] of Object.entries(omnifocusTasks)) {
+            if (!task.zammadToOmnifocusMatched) {
+                var can_delete = true;
+                if(task.hasChildren){
+                    task.children.forEach(subtask => {
+                        if (!subtask.completed){
+                          can_delete = false;
+                        }
+                    });
+                }
+                if(can_delete) {
+                  task.markComplete();
+                }
+            }
           }
 
         }
@@ -145,21 +163,6 @@
           console.log(`DEBUG: catch error ${err}`);
       });
 
-      for (const [task_id, task] of Object.entries(omnifocusTasks)) {
-        if (!task.jiraToOmnifocusMatched) {
-            var can_delete = true;
-            if(task.hasChildren){
-                task.children.forEach(subtask => {
-                    if (!subtask.completed){
-                      can_delete = false;
-                    }
-                });
-            }
-            if(can_delete) {
-              task.markComplete();
-            }
-        }
-      }
       
   });
 
