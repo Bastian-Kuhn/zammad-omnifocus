@@ -3,7 +3,7 @@
   "targets": ["omnifocus"],
   "author": "Bastian Kuhn",
   "identifier": "de.bastian-kuhn.zammad.sync",
-  "version": "1.1",
+  "version": "1.0",
   "description": "Sync Tickets from Zammad with Omnifocus",
   "label": "🔹 Zammad: Sync",
   "shortLabel": "Zammad: sync"
@@ -12,7 +12,7 @@
   const action = new PlugIn.Action(function (selection, sender) {
     const config = {
         token: "", // you need to use api tokens
-        zammadUrl: "",
+        zammadUrl: "https://xxx.kuhn-ruess.de",
         omnifocusTagToUse: "Zammad", // you can also use the format "Parent1 : Parent2 : Child"
         userId: 4, 
       };
@@ -95,74 +95,74 @@
           for (const user of jsonResponse) {
               users[user.id] = user;
           }
+        } else {
+            console.error('Cant get users')
         }
-      });
+
+        const queryTickets = `owner_id:${user_id} AND (state_id:2 OR state_id:1)`;
+        const encodedQuery =  encodeURIComponent(queryTickets);
+        const urlParamsTickets = `/api/v1/tickets/search?query=${encodedQuery}&page=1&per_page=500`;
+        const urlTickets = zammadUrl + urlParamsTickets;
+
+        const request = URL.FetchRequest.fromString(urlTickets);
 
 
-      const queryTickets = `owner_id:${user_id} AND (state_id:2 OR state_id:1)`;
-      const encodedQuery =  encodeURIComponent(queryTickets);
-      const urlParamsTickets = `/api/v1/tickets/search?query=${encodedQuery}&page=1&per_page=500`;
-      const urlTickets = zammadUrl + urlParamsTickets;
+        request.method = "GET";
+        request.headers = { Authorization: `Token ${token}` };
+        const requestPromise = request.fetch();
 
-      const request = URL.FetchRequest.fromString(urlTickets);
-
-
-      request.method = "GET";
-      request.headers = { Authorization: `Token ${token}` };
-      const requestPromise = request.fetch();
-
-      requestPromise.then((response) => {
-        if (response.mimeType == "application/json") {
-          const jsonResponse = JSON.parse(response.bodyString);
-          for (const ticketId of jsonResponse.tickets) {
-              const ticketData = jsonResponse.assets.Ticket[ticketId];
-              console.log(`Found: ${ticketData.title}`);
-              if (omnifocusTasks[ticketData.id]) {
-                // Make sure the task opens again
-                omnifocusTasks[ticketData.id].markIncomplete();
-                omnifocusTasks[ticketData.id].zammadToOmnifocusMatched = true;
-                console.log('-> Opened it');
-                continue;
-              }
-
-              // There was no Matching Task, so we create the Task
-              const userData = users[ticketData.customer_id];
-              const userString = `${userData.firstname} ${userData.lastname}`
-              const taskName = ticketData.id + " " + ticketData.title + " (" + userString  +")";
-              const newTask = new Task(taskName, inbox.beginning);
-              const taskUrl = zammadUrl + "#ticket/zoom/" + ticketData.id;
-              console.log('-> Created new Task');
-
-              newTask.addTag(tag);
-              newTask.note =
-                taskUrl + "\n";
-          }
-
-          for (const [task_id, task] of Object.entries(omnifocusTasks)) {
-            if (!task.zammadToOmnifocusMatched) {
-                var can_delete = true;
-                if(task.hasChildren){
-                    task.children.forEach(subtask => {
-                        if (!subtask.completed){
-                          can_delete = false;
-                        }
-                    });
+        requestPromise.then((response) => {
+          if (response.mimeType == "application/json") {
+            const jsonResponse = JSON.parse(response.bodyString);
+            for (const ticketData of jsonResponse) {
+                //const ticketData = jsonResponse.assets.Ticket[ticketId];
+                console.log(`Found: ${ticketData.title}`);
+                if (omnifocusTasks[ticketData.id]) {
+                  // Make sure the task opens again
+                  omnifocusTasks[ticketData.id].markIncomplete();
+                  omnifocusTasks[ticketData.id].zammadToOmnifocusMatched = true;
+                  console.log('-> Opened it');
+                  continue;
                 }
-                if(can_delete) {
-                  task.markComplete();
-                }
+
+                // There was no Matching Task, so we create the Task
+                const userData = users[ticketData.customer_id];
+                const userString = `${userData.firstname} ${userData.lastname}`
+                const taskName = ticketData.id + " " + ticketData.title + " (" + userString  +")";
+                const newTask = new Task(taskName, inbox.beginning);
+                const taskUrl = zammadUrl + "#ticket/zoom/" + ticketData.id;
+                console.log('-> Created new Task');
+
+                newTask.addTag(tag);
+                newTask.note =
+                  taskUrl + "\n";
             }
+
+            for (const [task_id, task] of Object.entries(omnifocusTasks)) {
+              if (!task.zammadToOmnifocusMatched) {
+                  var can_delete = true;
+                  if(task.hasChildren){
+                      task.children.forEach(subtask => {
+                          if (!subtask.completed){
+                            can_delete = false;
+                          }
+                      });
+                  }
+                  if(can_delete) {
+                    task.markComplete();
+                  }
+              }
+            }
+
           }
+        });
 
-        }
-
-
-      });
 
       requestPromise.catch((err) => {
           console.log(`DEBUG: catch error ${err}`);
       });
 
+    });
       
   });
 
