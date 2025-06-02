@@ -12,7 +12,7 @@
   const action = new PlugIn.Action(function (selection, sender) {
     const config = {
         token: "", // you need to use api tokens
-        zammadUrl: "https://xxx.kuhn-ruess.de",
+        zammadUrl: "",
         omnifocusTagToUse: "Zammad", // you can also use the format "Parent1 : Parent2 : Child"
         userId: 4, 
       };
@@ -125,10 +125,17 @@
                   continue;
                 }
 
+                //console.log(JSON.stringify(ticketData, null, 2));
+
                 // There was no Matching Task, so we create the Task
                 const userData = users[ticketData.customer_id];
-                const userString = `${userData.firstname} ${userData.lastname}`
-                const taskName = ticketData.id + " " + ticketData.title + " (" + userString  +")";
+                try {
+                    var userString = `${userData.firstname} ${userData.lastname}`;
+                } catch (error) {
+                    var userString = 'Uknown';
+                }
+
+                const taskName = ticketData.id + " [" + ticketData.number +"] "+ ticketData.title + " (" + userString  +")";
                 const newTask = new Task(taskName, inbox.beginning);
                 const taskUrl = zammadUrl + "#ticket/zoom/" + ticketData.id;
                 console.log('-> Created new Task');
